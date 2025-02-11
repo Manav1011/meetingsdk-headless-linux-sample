@@ -1,9 +1,33 @@
 #include "ZoomSDKAudioRawDataDelegate.h"
 #include "../util/WebSocketClient.h"
+#include <iostream>
+#include "../util/json.hpp"
+#include <vector>
+#include <cstring>
+#include <arpa/inet.h>  // for htonl
+#include <openssl/evp.h> // for Base64 encoding
+#include <openssl/evp.h>
+#include <openssl/buffer.h>  // Include
 
 extern WebSocketClient* g_webSocketClient;
+using json = nlohmann::json;
 
-ZoomSDKAudioRawDataDelegate::ZoomSDKAudioRawDataDelegate(bool useMixedAudio = true, bool transcribe = false) : m_useMixedAudio(useMixedAudio), m_transcribe(transcribe){
+std::string base64_encode(const uint8_t* buffer, size_t length) {
+    BIO* bio, * b64;
+    BUF_MEM* bufferPtr;
+    b64 = BIO_new(BIO_f_base64());
+    bio = BIO_new(BIO_s_mem());
+    bio = BIO_push(b64, bio);
+    BIO_set_flags(bio, BIO_FLAGS_BASE64_NO_NL); // No newline
+    BIO_write(bio, buffer, length);
+    BIO_flush(bio);
+    BIO_get_mem_ptr(bio, &bufferPtr);
+    std::string encodedData(bufferPtr->data, bufferPtr->length);
+    BIO_free_all(bio);
+    return encodedData;
+}
+
+ZoomSDKAudioRawDataDelegate::ZoomSDKAudioRawDataDelegate(bool useMixedAudio = false, bool transcribe = false) : m_useMixedAudio(useMixedAudio), m_transcribe(transcribe){
     server.start();
 }
 
@@ -37,14 +61,32 @@ void ZoomSDKAudioRawDataDelegate::onMixedAudioRawDataReceived(AudioRawData* data
     }
 }
 
-
 void ZoomSDKAudioRawDataDelegate::onOneWayAudioRawDataReceived(AudioRawData* data, uint32_t node_id) {
-    if (m_useMixedAudio) return;
+    if (g_webSocketClient) {
+        // Encode audio data in Base64
+        std::string audioBase64 = base64_encode(reinterpret_cast<const uint8_t*>(data->GetBuffer()), data->GetBufferLen());
 
-    stringstream path;
-    path << m_dir << "/node-" << node_id << ".pcm";
-    writeToFile(path.str(), data);
+        // Create JSON object
+        json audioPacket = {
+            {"node_id", node_id},
+            {"audio", audioBase64}
+        };
+
+        // Convert JSON to string
+        std::string jsonString = audioPacket.dump();
+
+        // Send JSON
+        g_webSocketClient->send(jsonString);
+    }
 }
+
+// void ZoomSDKAudioRawDataDelegate::onOneWayAudioRawDataReceived(AudioRawData* data, uint32_t node_id) {
+//     if (m_useMixedAudio) return;
+
+//     stringstream path;
+//     path << m_dir << "/node-" << node_id << ".pcm";
+//     writeToFile(path.str(), data);
+// }
 
 void ZoomSDKAudioRawDataDelegate::onShareAudioRawDataReceived(AudioRawData* data) {
     stringstream ss;

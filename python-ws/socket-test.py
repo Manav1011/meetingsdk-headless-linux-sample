@@ -1,6 +1,7 @@
 import asyncio
 import websockets
 import numpy as np
+import json
 import sounddevice as sd
 import numpy as np
 import time
@@ -58,10 +59,22 @@ async def echo(websocket):
     try:
         async for message in websocket:
             if isinstance(message, bytes):  
-                # print(f"📥 Received {len(message)} bytes of audio")
-                await detect_silence(message,websocket)  # Process without delay
+                pass
+                # node_id = struct.unpack('!I', message[:4])[0]  # '!I' means big-endian unsigned int
+                
+                # # Rest is audio data
+                # audio_data = message[4:]
+                
+                # print(f"Received data from node {node_id}, audio data size: {len(audio_data)}")
+                # await detect_silence(message,websocket)  # Process without delay
             else:
-                print(f"Received text message: {message}")
+                data = json.loads(message)  # Parse JSON
+                node_id = data["node_id"]
+                audio_base64 = data["audio"]
+                # Decode Base64 audio
+                audio_bytes = base64.b64decode(audio_base64)
+                print(f"📥 Received {len(audio_bytes)} bytes of audio from Node {node_id}")
+                
     except Exception as e:
         print(f"Error: {e}")
     finally:
