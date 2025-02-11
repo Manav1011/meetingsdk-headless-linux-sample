@@ -4,6 +4,7 @@
   "dependencies": [
     "ada-url",
     "cli11",
-    "jwt-cpp"
+    "jwt-cpp",
+    "websocketpp"
   ]
 }

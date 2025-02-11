@@ -1,5 +1,6 @@
 #include "Zoom.h"
 
+
 SDKError Zoom::config(int ac, char** av) {
     auto status = m_config.read(ac, av);
     if (status) {
@@ -288,6 +289,42 @@ SDKError Zoom::stopRawRecording() {
     hasError(err, "stop raw recording");
 
     return err;
+}
+
+SDKError Zoom::sendChatMessage(const string& message) {
+    if (!m_meetingService) {
+        return SDKERR_UNINITIALIZE;
+    }
+    
+    m_chatController = m_meetingService->GetMeetingChatController();
+    if (!m_chatController) {
+        Log::error("Failed to get chat controller");
+        return SDKERR_UNINITIALIZE;
+    }
+    IChatMsgInfo* chatMsg = m_chatController->GetChatMessageBuilder()->SetReceiver(0)->SetMessageType(ZOOMSDK::SDKChatMessageType_To_All)->SetContent(message.c_str())->Build();
+    // Get the message builder
+    // IChatMsgInfoBuilder* builder = m_chatController->GetChatMessageBuilder();
+    // if (!builder) {
+    //     Log::error("Failed to get chat message builder");
+    //     return SDKERR_UNINITIALIZE;
+    // }
+
+    // // Build the message
+    // builder->SetContent(message.c_str())    // Set message content
+    //        ->SetReceiver(0);                // 0 means send to all participants
+
+    //  builder->SetContent(message.c_str())->SetMessageType(ZOOMSDK::SDKChatMessageType_To_All)->SetReceiver(0); 
+
+
+    // Create the message object
+    // IChatMsgInfo* chatMsg = builder->Build();
+    if (!chatMsg) {
+        Log::error("Failed to build chat message");
+        return SDKERR_UNINITIALIZE;
+    }
+
+    // Send the message
+    return m_chatController->SendChatMsgTo(chatMsg);
 }
 
 bool Zoom::isMeetingStart() {

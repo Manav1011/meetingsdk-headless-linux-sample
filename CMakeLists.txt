@@ -21,8 +21,14 @@ link_directories(${X11_LIBRARIES})
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(deps REQUIRED IMPORTED_TARGET glib-2.0)
 
-find_package( OpenCV REQUIRED )
-include_directories( ${OpenCV_INCLUDE_DIRS} )
+find_package(OpenCV REQUIRED)
+include_directories(${OpenCV_INCLUDE_DIRS})
+
+# Add vcpkg toolchain file
+set(CMAKE_TOOLCHAIN_FILE "${CMAKE_SOURCE_DIR}/vcpkg/scripts/buildsystems/vcpkg.cmake" CACHE STRING "Vcpkg toolchain file")
+
+# Find websocketpp package
+find_package(websocketpp CONFIG REQUIRED)
 
 include_directories(${ZOOM_SDK}/h)
 link_directories(${ZOOM_SDK} ${ZOOM_SDK})
@@ -51,14 +57,10 @@ add_executable(zoomsdk src/main.cpp
         src/raw_send/ZoomSDKVideoSource.cpp
         src/util/SocketServer.h
         src/util/SocketServer.cpp
+        src/util/WebSocketClient.cpp
+        src/util/WebSocketClient.h
 )
 
 
 target_include_directories(zoomsdk PRIVATE ${JWT_CPP_INCLUDE_DIRS})
-target_link_libraries(zoomsdk PRIVATE meetingsdk ada::ada CLI11::CLI11 PkgConfig::deps ${OpenCV_LIBS} ${X11_LIBRARIES})
-
-
-
-
-
-
+target_link_libraries(zoomsdk PRIVATE meetingsdk ada::ada CLI11::CLI11 PkgConfig::deps ${OpenCV_LIBS} ${X11_LIBRARIES} websocketpp::websocketpp)

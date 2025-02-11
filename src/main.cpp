@@ -2,7 +2,9 @@
 #include <glib.h>
 #include "Config.h"
 #include "Zoom.h"
+#include "util/WebSocketClient.h"
 
+WebSocketClient* g_webSocketClient = nullptr;
 
 /**
  *  Callback fired atexit()
@@ -49,6 +51,20 @@ SDKError run(int argc, char** argv) {
 
     atexit(onExit);
 
+    g_webSocketClient = new WebSocketClient();
+    g_webSocketClient->connect("ws://10.42.0.236:8000");
+    g_webSocketClient->setMessageHandler([zoom](const std::string& message) {
+        std::cout << "Received message: " << message << std::endl;
+        SDKError err = zoom->sendChatMessage(message);
+        if (err != ZOOM_SDK_NAMESPACE::SDKERR_SUCCESS)
+        {
+            std::cout << "Failed to send a chat message: " << err << std::endl;
+        }
+        if (Zoom::hasError(err, "send chat message")) {
+            Log::error("Failed to send chat message");
+        }
+    });
+    
     // read the CLI and config.ini file
     err = zoom->config(argc, argv);
     if (Zoom::hasError(err, "configure"))

@@ -1,34 +1,41 @@
 #include "ZoomSDKAudioRawDataDelegate.h"
+#include "../util/WebSocketClient.h"
 
+extern WebSocketClient* g_webSocketClient;
 
 ZoomSDKAudioRawDataDelegate::ZoomSDKAudioRawDataDelegate(bool useMixedAudio = true, bool transcribe = false) : m_useMixedAudio(useMixedAudio), m_transcribe(transcribe){
     server.start();
 }
 
-void ZoomSDKAudioRawDataDelegate::onMixedAudioRawDataReceived(AudioRawData *data) {
-    if (!m_useMixedAudio) return;
+// void ZoomSDKAudioRawDataDelegate::onMixedAudioRawDataReceived(AudioRawData *data) {
+//     if (!m_useMixedAudio) return;
 
-    // write to socket
-    if (m_transcribe) {
-        server.writeBuf(data->GetBuffer(), data->GetBufferLen());
-        return;
+//     // write to socket
+//     if (m_transcribe) {
+//         server.writeBuf(data->GetBuffer(), data->GetBufferLen());
+//         return;
+//     }
+
+//     // or write to file
+//     if (m_dir.empty())
+//         return Log::error("Output Directory cannot be blank");
+
+
+//     if (m_filename.empty())
+//         m_filename = "test.pcm";
+
+
+//     stringstream path;
+//     path << m_dir << "/" << m_filename;
+
+//     writeToFile(path.str(), data);
+// }
+
+void ZoomSDKAudioRawDataDelegate::onMixedAudioRawDataReceived(AudioRawData* data) {
+    if (g_webSocketClient) {
+        g_webSocketClient->sendBinary(data->GetBuffer(), data->GetBufferLen());
     }
-
-    // or write to file
-    if (m_dir.empty())
-        return Log::error("Output Directory cannot be blank");
-
-
-    if (m_filename.empty())
-        m_filename = "test.pcm";
-
-
-    stringstream path;
-    path << m_dir << "/" << m_filename;
-
-    writeToFile(path.str(), data);
 }
-
 
 
 void ZoomSDKAudioRawDataDelegate::onOneWayAudioRawDataReceived(AudioRawData* data, uint32_t node_id) {

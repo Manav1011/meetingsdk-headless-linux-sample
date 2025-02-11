@@ -20,6 +20,8 @@
 #include "meeting_service_components/meeting_audio_interface.h"
 #include "meeting_service_components/meeting_participants_ctrl_interface.h"
 #include "meeting_service_components/meeting_video_interface.h"
+#include "meeting_service_components/meeting_chat_interface.h"
+
 #include "setting_service_interface.h"
 
 #include "events/AuthServiceEvent.h"
@@ -52,6 +54,8 @@ class Zoom : public Singleton<Zoom> {
     IMeetingService* m_meetingService;
     ISettingService* m_settingService;
     IAuthService* m_authService;
+
+    IMeetingChatController* m_chatController;
 
     IZoomSDKRenderer* m_videoHelper;
     ZoomSDKRendererDelegate* m_renderDelegate;
@@ -98,6 +102,7 @@ class Zoom : public Singleton<Zoom> {
         }
     };
 
+
 public:
     Zoom() {};
     SDKError init();
@@ -113,9 +118,14 @@ public:
     SDKError startRawRecording();
     SDKError stopRawRecording();
 
+    SDKError sendChatMessage(const string& message);
+    
+
     bool isMeetingStart();
 
     static bool hasError(SDKError e, const string& action="");
+
+    IMeetingService* getMeetingService() { return m_meetingService; }
 
 };
 

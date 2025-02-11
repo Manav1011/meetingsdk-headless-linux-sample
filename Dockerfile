@@ -55,15 +55,23 @@ ENV TINI_VERSION v0.19.0
 ADD https://github.com/krallin/tini/releases/download/${TINI_VERSION}/tini /tini
 RUN chmod +x /tini
 
+RUN apt-get update && apt-get install -y autoconf automake autoconf-archive
+
 WORKDIR /opt
 RUN git clone --depth 1 https://github.com/Microsoft/vcpkg.git \
     && ./vcpkg/bootstrap-vcpkg.sh -disableMetrics \
     && ln -s /opt/vcpkg/vcpkg /usr/local/bin/vcpkg \
-    && vcpkg install vcpkg-cmake
+    && vcpkg install vcpkg-cmake boost-system boost-asio boost-log
 
 FROM deps AS build
 
 WORKDIR $cwd
+
+
+# Set CMake to use vcpkg toolchain
+ENV CMAKE_TOOLCHAIN_FILE=/opt/vcpkg/scripts/buildsystems/vcpkg.cmake
+ENV VCPKG_ROOT=/opt/vcpkg
+
 ENTRYPOINT ["/tini", "--", "./bin/entry.sh"]
 
 
