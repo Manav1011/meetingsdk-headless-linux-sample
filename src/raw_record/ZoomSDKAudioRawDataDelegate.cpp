@@ -8,6 +8,12 @@
 #include <openssl/evp.h> // for Base64 encoding
 #include <openssl/evp.h>
 #include <openssl/buffer.h>  // Include
+#include <chrono>
+// #include "meeting_service_components/meeting_audio_interface.h"
+// #include "meeting_service_components/meeting_participants_ctrl_interface.h"
+#include "../Zoom.h" // Assuming Zoom.h contains the getMeetingService() method
+
+
 
 extern WebSocketClient* g_webSocketClient;
 using json = nlohmann::json;
@@ -65,18 +71,24 @@ void ZoomSDKAudioRawDataDelegate::onOneWayAudioRawDataReceived(AudioRawData* dat
     if (g_webSocketClient) {
         // Encode audio data in Base64
         std::string audioBase64 = base64_encode(reinterpret_cast<const uint8_t*>(data->GetBuffer()), data->GetBufferLen());
-
-        // Create JSON object
-        json audioPacket = {
-            {"node_id", node_id},
-            {"audio", audioBase64}
-        };
-
-        // Convert JSON to string
-        std::string jsonString = audioPacket.dump();
-
-        // Send JSON
-        g_webSocketClient->send(jsonString);
+        IMeetingParticipantsController* participantsController = Zoom::getInstance().getMeetingService()->GetMeetingParticipantsController();
+        if (participantsController) {
+            IUserInfo* userInfo = participantsController->GetUserByUserID(node_id);
+            if (userInfo) {
+                std::string userName = userInfo->GetUserName();
+                // std::cout << "User Name: " << userName << std::endl;
+                if (userName != "ZoomBot"){
+                    nlohmann::json audioPacket = {
+                        {"username", userName},
+                        {"node_id", node_id},
+                        {"audio", audioBase64}
+                    };
+                    std::string jsonString = audioPacket.dump();
+                    // Send JSON
+                    g_webSocketClient->send(jsonString);
+                }
+            }
+        }
     }
 }
 

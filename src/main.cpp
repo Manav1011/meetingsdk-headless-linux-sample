@@ -52,7 +52,7 @@ SDKError run(int argc, char** argv) {
     atexit(onExit);
 
     g_webSocketClient = new WebSocketClient();
-    g_webSocketClient->connect("ws://10.42.0.236:8000");
+    g_webSocketClient->connect("ws://10.42.0.236:8001");
     g_webSocketClient->setMessageHandler([zoom](const std::string& message) {
         std::cout << "Received message: " << message << std::endl;
         SDKError err = zoom->sendChatMessage(message);
