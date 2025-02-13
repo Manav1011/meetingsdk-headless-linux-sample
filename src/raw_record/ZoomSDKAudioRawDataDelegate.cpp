@@ -15,6 +15,7 @@
 // #include "meeting_service_components/meeting_participants_ctrl_interface.h"
 #include "../Zoom.h" // Assuming Zoom.h contains the getMeetingService() method
 
+#include "../Config.h"
 
 
 extern WebSocketClient* g_webSocketClient;
@@ -87,17 +88,21 @@ void ZoomSDKAudioRawDataDelegate::onOneWayAudioRawDataReceived(AudioRawData* dat
         // Encode audio data in Base64
         std::string audioBase64 = base64_encode(reinterpret_cast<const uint8_t*>(data->GetBuffer()), data->GetBufferLen());
         IMeetingParticipantsController* participantsController = Zoom::getInstance().getMeetingService()->GetMeetingParticipantsController();
+        Config config;
+        // Get the meeting ID
+        std::string meetingId = config.meetingId();
         if (participantsController) {
             IUserInfo* userInfo = participantsController->GetUserByUserID(node_id);
             if (userInfo) {
                 std::string userName = userInfo->GetUserName();
-                std::string timestamp = getCurrentTimestamp()
+                std::string timestamp = getCurrentTimestamp();
                 // std::cout << "User Name: " << userName << std::endl;
                 if (userName != "ZoomBot"){
                     std::string timestamp = getCurrentTimestamp();
                     // Create JSON payload
                     nlohmann::json audioPacket = {
                         {"username", userName},
+                        {"meeting_id", meetingId},
                         {"node_id", node_id},
                         {"audio", audioBase64},
                         {"timestamp", timestamp}  // Add timestamp

@@ -10,6 +10,8 @@ import time
 import multiprocessing
 import io
 import soundfile as sf
+import psycopg2
+import psycopg2.extras  # For better performance with dictionarie
 import sounddevice as sd
 
 silence_threshold = 500  # Adjust based on noise levels
@@ -49,11 +51,44 @@ def process_chunk(pcm_data):
 def transcriber_process(audio_queue, result_queue):
     """ Process that loads the Whisper model once and transcribes incoming audio """
 
+     # Establish a persistent PostgreSQL connection
+    try:
+        conn = psycopg2.connect(
+            dbname="dockertestdb",
+            user="manav1011",
+            password="Manav@1011",
+            host="192.168.7.70",
+            port=5432
+        )
+        print("✅ Connected to PostgreSQL")
+        cur = conn.cursor()
+        cur.execute("""
+            PREPARE insert_transcription AS 
+            INSERT INTO zoom.transcripts (meeting_id, user_id, username, transcript, created_at) 
+            VALUES ($1, $2, $3, $4, $5)
+        """)
+        conn.commit()  # Save prepared statement
+        print("✅ Prepared statement created")
+    except Exception as e:
+        print(f"❌ Database Connection Error: {e}")
+        return  # Exit process if database connection fails
+    
     while True:
         item = audio_queue.get()
         if item is None:
             break  # Graceful shutdown
         # print('New Item')
+        wav_file, user, chunk_time = item  # Extract data from queue
+        transcript = "Mock transcription text"  # Replace with real transcription
+        meeting_id, user_id, username = user.split("_")  # Adjust parsing if needed
+        try:
+            cur.execute("EXECUTE insert_transcription (%s, %s, %s, %s, %s)", 
+                        (meeting_id, user_id, username, transcript, chunk_time))
+            conn.commit()  # Commit after each insert
+            print(f"✅ Transcription saved for {username} at {chunk_time}")
+        except Exception as e:
+            print(f"❌ Database Insert Error: {e}")
+            conn.rollback()  # Rollback in case of error
 
 async def detect_silence(audio_bytes, websocket):
     """Detect silence periods longer than 5 seconds and notify the client every 1 minute"""
@@ -101,7 +136,7 @@ async def echo(websocket):
                 data = json.loads(message)  # Parse JSON
                 audio_bytes = base64.b64decode(data['audio'])
                 # print("New Data Incoming..:")
-                audio_data[f"{data['node_id']}_{data['username']}"].append((data['timestamp'],audio_bytes))
+                audio_data[f"{data['meeting_id']}_{data['node_id']}_{data['username']}"].append((data['timestamp'],audio_bytes))
                 # print(f"recieveing length {len(audio_data[f"{data['node_id']}_{data['username']}"])}")
                 
     except Exception as e:
