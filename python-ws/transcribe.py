@@ -17,7 +17,6 @@ CHUNK_SIZE = 10 * BYTES_PER_SECOND  # 5 seconds = 320,000 bytes
 audio_queue = multiprocessing.Queue()
 result_queue = multiprocessing.Queue()
 
-
 def process_chunk(pcm_data):
     """Convert PCM bytes to WAV and return as BytesIO"""
     wav_io = io.BytesIO()

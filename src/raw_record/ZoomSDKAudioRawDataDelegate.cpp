@@ -9,6 +9,8 @@
 #include <openssl/evp.h>
 #include <openssl/buffer.h>  // Include
 #include <chrono>
+#include <iomanip>
+#include <sstream>
 // #include "meeting_service_components/meeting_audio_interface.h"
 // #include "meeting_service_components/meeting_participants_ctrl_interface.h"
 #include "../Zoom.h" // Assuming Zoom.h contains the getMeetingService() method
@@ -32,6 +34,19 @@ std::string base64_encode(const uint8_t* buffer, size_t length) {
     BIO_free_all(bio);
     return encodedData;
 }
+
+std::string getCurrentTimestamp() {
+    auto now = std::chrono::system_clock::now();
+    auto timeT = std::chrono::system_clock::to_time_t(now);
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
+
+    std::ostringstream oss;
+    oss << std::put_time(std::gmtime(&timeT), "%Y-%m-%dT%H:%M:%S");
+    oss << "." << std::setw(3) << std::setfill('0') << ms.count() << "Z";  // Milliseconds + UTC 'Z'
+    
+    return oss.str();
+}
+
 
 ZoomSDKAudioRawDataDelegate::ZoomSDKAudioRawDataDelegate(bool useMixedAudio = false, bool transcribe = false) : m_useMixedAudio(useMixedAudio), m_transcribe(transcribe){
     server.start();
@@ -76,12 +91,16 @@ void ZoomSDKAudioRawDataDelegate::onOneWayAudioRawDataReceived(AudioRawData* dat
             IUserInfo* userInfo = participantsController->GetUserByUserID(node_id);
             if (userInfo) {
                 std::string userName = userInfo->GetUserName();
+                std::string timestamp = getCurrentTimestamp()
                 // std::cout << "User Name: " << userName << std::endl;
                 if (userName != "ZoomBot"){
+                    std::string timestamp = getCurrentTimestamp();
+                    // Create JSON payload
                     nlohmann::json audioPacket = {
                         {"username", userName},
                         {"node_id", node_id},
-                        {"audio", audioBase64}
+                        {"audio", audioBase64},
+                        {"timestamp", timestamp}  // Add timestamp
                     };
                     std::string jsonString = audioPacket.dump();
                     // Send JSON

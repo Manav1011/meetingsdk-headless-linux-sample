@@ -37,6 +37,7 @@ audio_data = defaultdict(list)  # Automatically creates empty bytearray if key d
 audio_queue = multiprocessing.Queue()
 result_queue = multiprocessing.Queue()
 
+
 def process_chunk(pcm_data):
     """Convert PCM bytes to WAV and return as BytesIO"""
     wav_io = io.BytesIO()
@@ -100,7 +101,7 @@ async def echo(websocket):
                 data = json.loads(message)  # Parse JSON
                 audio_bytes = base64.b64decode(data['audio'])
                 # print("New Data Incoming..:")
-                audio_data[f"{data['node_id']}_{data['username']}"].append(audio_bytes)
+                audio_data[f"{data['node_id']}_{data['username']}"].append((data['timestamp'],audio_bytes))
                 # print(f"recieveing length {len(audio_data[f"{data['node_id']}_{data['username']}"])}")
                 
     except Exception as e:
@@ -116,22 +117,28 @@ async def repeated_task():
             audio_buffer = bytearray()
             # print(f"Audio buffer length {len(audio_buffer)}")
             audio_chunks = audio_data[user][:]
+            timestamps = []  # Track timestamps for the buffer
+
             print(f"chunks for transcription {len(audio_data[user])}")
-            for audio in audio_chunks:
+            for timestamp,audio in audio_chunks:
                 audio_buffer.extend(audio)  # Append chunk data
+                timestamps.append(timestamp)  # Store timestamp
                 # If buffer reaches 5 seconds, process it
                 while len(audio_buffer) >= CHUNK_SIZE:
                     pcm_chunk = audio_buffer[:CHUNK_SIZE]  # Take 5 sec chunk
                     audio_buffer = audio_buffer[CHUNK_SIZE:]  # Remove processed data
                     wav_file = process_chunk(pcm_chunk)  # Convert PCM to WAV
-                    audio_queue.put((wav_file, user))
-                audio_data[user].remove(audio)
+                    chunk_time = timestamps.pop(0)
+                    audio_queue.put((wav_file, user,chunk_time))
+                audio_data[user].remove((timestamp,audio))
+
             print(f"after deleting the chunks {len(audio_data[user])}")
 
             if len(audio_buffer) > 0:
                 # print(f"Left out chunks {len(audio_buffer)}")
                 wav_file = process_chunk(audio_buffer)  # Convert remaining PCM to WAV
-                audio_queue.put((wav_file, user))  # Send to Whisper
+                chunk_time = timestamps.pop(0)
+                audio_queue.put((wav_file, user,timestamp))  # Send to Whisper
                 audio_buffer.clear()  # Clear the buffer after processing
             # print(f"Audio buffer length {len(audio_buffer)}")
 
