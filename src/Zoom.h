@@ -108,7 +108,6 @@ public:
     SDKError init();
     SDKError auth();
     SDKError config(int ac, char** av);
-
     SDKError join();
     SDKError start();
     SDKError leave();
@@ -122,10 +121,14 @@ public:
     
 
     bool isMeetingStart();
+    std::string getMeetingID() const;
 
     static bool hasError(SDKError e, const string& action="");
 
     IMeetingService* getMeetingService() { return m_meetingService; }
+
+private:
+    std::string m_meetingID; // Add this member variable
 
 };
 

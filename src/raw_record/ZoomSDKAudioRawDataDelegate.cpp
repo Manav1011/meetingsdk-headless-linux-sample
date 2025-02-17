@@ -49,7 +49,7 @@ std::string getCurrentTimestamp() {
 }
 
 
-ZoomSDKAudioRawDataDelegate::ZoomSDKAudioRawDataDelegate(bool useMixedAudio = false, bool transcribe = false) : m_useMixedAudio(useMixedAudio), m_transcribe(transcribe){
+ZoomSDKAudioRawDataDelegate::ZoomSDKAudioRawDataDelegate(bool useMixedAudio = true, bool transcribe = false) : m_useMixedAudio(useMixedAudio), m_transcribe(transcribe){
     server.start();
 }
 
@@ -77,9 +77,34 @@ ZoomSDKAudioRawDataDelegate::ZoomSDKAudioRawDataDelegate(bool useMixedAudio = fa
 //     writeToFile(path.str(), data);
 // }
 
+// std::string ZoomSDKAudioRawDataDelegate::getMeetingID() {
+//     IMeetingService* meetingService = Zoom::getInstance().getMeetingService();
+//     if (meetingService) {
+//         IMeetingInfo* meetingInfo = meetingService->GetMeetingInfo();
+//         if (meetingInfo) {
+//             const zchar_t* meetingID = meetingInfo->GetMeetingID();
+//             if (meetingID) {
+//                 return std::string(meetingID);
+//             }
+//         }
+//     }
+//     return "";
+// }
+
 void ZoomSDKAudioRawDataDelegate::onMixedAudioRawDataReceived(AudioRawData* data) {
     if (g_webSocketClient) {
-        g_webSocketClient->sendBinary(data->GetBuffer(), data->GetBufferLen());
+        std::string audioBase64 = base64_encode(reinterpret_cast<const uint8_t*>(data->GetBuffer()), data->GetBufferLen());
+        // Get the meeting ID
+        std::string meetingID = Zoom::getInstance().getMeetingID();
+        std::string timestamp = getCurrentTimestamp();
+        nlohmann::json audioPacket = {
+            {"action","stream_mixed"},
+            {"meeting_id", meetingID},
+            {"audio", audioBase64},
+            {"timestamp", timestamp}        
+        };
+        std::string jsonString = audioPacket.dump();
+        g_webSocketClient->send(jsonString);
     }
 }
 
@@ -90,7 +115,8 @@ void ZoomSDKAudioRawDataDelegate::onOneWayAudioRawDataReceived(AudioRawData* dat
         IMeetingParticipantsController* participantsController = Zoom::getInstance().getMeetingService()->GetMeetingParticipantsController();
         Config config;
         // Get the meeting ID
-        std::string meetingId = config.meetingId();
+        std::string meetingID = Zoom::getInstance().getMeetingID();
+        // std::cout << "Meeting ID: " << meetingID << std::endl;
         if (participantsController) {
             IUserInfo* userInfo = participantsController->GetUserByUserID(node_id);
             if (userInfo) {
@@ -101,8 +127,9 @@ void ZoomSDKAudioRawDataDelegate::onOneWayAudioRawDataReceived(AudioRawData* dat
                     std::string timestamp = getCurrentTimestamp();
                     // Create JSON payload
                     nlohmann::json audioPacket = {
+                        {"action","stream_individual"},
                         {"username", userName},
-                        {"meeting_id", meetingId},
+                        {"meeting_id", meetingID},
                         {"node_id", node_id},
                         {"audio", audioBase64},
                         {"timestamp", timestamp}  // Add timestamp

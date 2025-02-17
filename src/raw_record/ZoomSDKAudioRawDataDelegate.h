@@ -25,6 +25,7 @@ class ZoomSDKAudioRawDataDelegate : public IZoomSDKAudioRawDataDelegate {
 
     void writeToFile(const string& path, AudioRawData* data);
 public:
+    // std::string getMeetingID();
     ZoomSDKAudioRawDataDelegate(bool useMixedAudio, bool transcribe);
     void setDir(const string& dir);
     void setFilename(const string& filename);

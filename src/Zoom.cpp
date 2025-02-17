@@ -115,6 +115,8 @@ SDKError Zoom::join() {
         return err;
     }
 
+    m_meetingID = mid; // Store the meeting ID in the member variable
+
     auto meetingNumber = stoull(mid);
     auto userName = displayName.c_str();
     auto psw = password.c_str();
@@ -345,4 +347,8 @@ bool Zoom::hasError(const SDKError e, const string& action) {
         }
     }
     return isError;
+}
+
+std::string Zoom::getMeetingID() const {
+    return m_meetingID;
 }
