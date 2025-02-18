@@ -17,7 +17,7 @@ public:
     void send(const std::string& message);
     void sendBinary(const void* data, size_t len);
     void setMessageHandler(std::function<void(const std::string&)> handler);
-
+    void close(); // Add the close method declaration
 
 private:
     client m_client;

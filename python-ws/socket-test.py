@@ -21,13 +21,12 @@ text_model = genai.GenerativeModel("gemini-1.5-flash-8b")
 import json
 import re
 
-
 # 🔧 Silence Detection Config
 silence_threshold = 2000  
 silence_start = None  
 silence_duration = 0  
 last_silence_notification = 0  
-silence_notification_interval = 60  
+silence_notification_interval = 60*10
 
 # 🔧 PCM Properties
 SAMPLE_RATE = 32000  
@@ -43,9 +42,7 @@ result_queue = multiprocessing.Queue()
 
 NUM_WORKERS = min(6, multiprocessing.cpu_count())  # Adjust based on CPU cores & memory
 
-active_connections = set()
-
-
+active_connections = dict()
 
 def split_into_chunks(text, chunk_size=5000, tolerance=1000):
     chunks = []
@@ -61,7 +58,6 @@ def split_into_chunks(text, chunk_size=5000, tolerance=1000):
 
         chunks.append(text[start:end])
         start = end
-
     return chunks
 
 def query_llm(chunk):
@@ -74,33 +70,47 @@ def query_llm(chunk):
 
     # Construct system and user messages
     messages = [
-        {"role": "system", "content": "You are an expert conversation summarizer."},
-        {"role": "system", "content": "Your goal is to provide a coherent summary, even if the user speaking order is mixed."},
-        {"role": "system", "content": "Maintain conversational flow, capture key details, and avoid redundancy."},
-        {"role": "system", "content": "temperature: 0.7"},  # Higher temperature for better context inference
-        {"role": "system", "content": "Respond strictly in JSON format. Do NOT use markdown formatting or code blocks. Ensure the response contains only the JSON object and nothing else."},
+        {
+        "role": "system",
+        "content": """
+            - You are a professional meeting assistant tasked with summarizing the meeting **up to the point** when the user presses the "Get Summary" button.
+            - Focus on extracting the most important discussion points, decisions, and action items from the meeting so far, while excluding minor details or off-topic conversation.
+            - Your summary should include the following sections:
+            - **Meeting Summary - [Date]**
+            - **Attendees:** List of participants.
+            - **Key Discussion Points:** Bullet points summarizing the key topics discussed up until now. Focus on high-level takeaways.
+            - **Decisions:** Bullet points listing key decisions made during the meeting.
+            - **Action Items:** Bullet points specifying tasks assigned to individuals, clearly labeled with responsible person(s).
+            - Use **bold** for key topics, decisions, and action items.
+            - Keep the tone professional and concise, suitable for business documentation.
+            - Ensure the **date** is automatically filled in based on the provided input.
+            - The summary should be generated **dynamically as the meeting progresses**, but finalized only when the user requests the summary.
+            - If any part of the meeting is in a language other than English, please **translate it into English** in the summary.
+        """
+        },
+        {"role": "system", "content": "temperature: 0"},  # Higher temperature for better context inference
         {"role": "user", "content": chunk}
     ]
 
     # Generate response from LLM
     response = text_model.generate_content(json.dumps(messages))
-
+    return response.text
     # Extract JSON from response
-    match = re.search(r"\{.*\}", response.text, re.DOTALL)  # Matches curly braces and content inside
-    if match:
-        json_string = match.group(0)
-    else:
-        print("No JSON found in response.")
-        return None  
+    # match = re.search(r"\{.*\}", response.text, re.DOTALL)  # Matches curly braces and content inside
+    # if match:
+    #     json_string = match.group(0)
+    # else:
+    #     print("No JSON found in response.")
+    #     return None  
 
-    # Parse JSON safely
-    try:
-        data = json.loads(json_string)
-        return data
-    except json.JSONDecodeError as e:
-        print(f"Error decoding JSON: {e}")
-        print(f"Raw response: {json_string}")  # Debugging info
-        return None  
+    # # Parse JSON safely
+    # try:
+    #     data = json.loads(json_string)
+    #     return data
+    # except json.JSONDecodeError as e:
+    #     print(f"Error decoding JSON: {e}")
+    #     print(f"Raw response: {json_string}")  # Debugging info
+    #     return None  
 
 # merge summary for next process
 def generate_final_summary(summaries, recursion_depth=0, max_recursion=10):
@@ -288,7 +298,7 @@ def transcriber_process(audio_queue, result_queue):
             print(f"❌ Error in transcription process: {e}")
             conn.rollback()
 
-async def detect_silence(audio_bytes, websocket):
+async def detect_silence(meeting_id,audio_bytes):
     """Detect silence and notify the client if it exceeds 5 seconds."""
     global silence_start, silence_duration, last_silence_notification  
 
@@ -311,7 +321,8 @@ async def detect_silence(audio_bytes, websocket):
             if last_silence_notification == 0 or (current_time - last_silence_notification >= silence_notification_interval):
                 print("⚠️ Silence detected for more than 5 seconds!")
                 message = {'action':'notify','message':'Silence Detected For 5 seconds'}
-                for client in active_connections:
+                clients = active_connections[meeting_id]
+                for client in clients:
                     try:
                         await client.send(json.dumps(message))
                     except Exception as e:
@@ -321,8 +332,30 @@ async def detect_silence(audio_bytes, websocket):
         silence_start = None  
         last_silence_notification = 0  
 
+class EchoServerProtocol:
+    def connection_made(self, transport):
+        self.transport = transport
+        print("Connection established")
+
+    def datagram_received(self, data, addr):
+        try:
+            message = data.decode()
+            asyncio.create_task(self.handle_datagram(message, addr))
+        except Exception as e:
+            print(f"Error decoding message: {e}")
+
+    async def handle_datagram(self, message, addr):
+        data = json.loads(message)
+        if data['action'] == 'stream_mixed':
+            audio_bytes = base64.b64decode(data['audio'])
+            # print('mixed audio')
+            await detect_silence(data['meeting_id'],audio_bytes)
+        if data['action'] == 'stream_individual':
+            audio_bytes = base64.b64decode(data['audio'])
+            audio_data[f"{data['meeting_id']}_{data['node_id']}_{data['username']}"].append((data['timestamp'], audio_bytes))
+
 async def echo(websocket):
-    active_connections.add(websocket)
+    # active_connections.add(websocket)
     print(f"🔗 New connection: {websocket.remote_address}")
     try:
         async for message in websocket:
@@ -330,15 +363,16 @@ async def echo(websocket):
                 pass
             else:
                 data = json.loads(message)
-                if data['action'] == 'stream_mixed':
-                    audio_bytes = base64.b64decode(data['audio'])
-                    # print('mixed audio')
-                    await detect_silence(audio_bytes,websocket)
-                if data['action'] == 'stream_individual':
-                    audio_bytes = base64.b64decode(data['audio'])
-                    audio_data[f"{data['meeting_id']}_{data['node_id']}_{data['username']}"].append((data['timestamp'], audio_bytes))
+                if data['action'] == 'connection':
+                    meeting_id = data['meeting_id']
+                    if meeting_id not in active_connections:
+                        active_connections[meeting_id] = [websocket]
+                    else:
+                        active_connections[meeting_id].append(websocket)
                 if data['action'] == 'meeting_ended':
                     # here we have to end the audio buffer for meeting
+                    del active_connections[meeting_id]
+                    print(active_connections)
                     asyncio.create_task(process_leftout_buffer(meeting_id=data['meeting_id']))
                     summary_process = multiprocessing.Process(target=generate_summary, args=(data['meeting_id'],))
                     summary_process.start()
@@ -421,6 +455,8 @@ for _ in range(NUM_WORKERS):
     processes.append(p)
 
 async def main():
+    loop = asyncio.get_running_loop()
+    transport, protocol = await loop.create_datagram_endpoint(EchoServerProtocol,local_addr=('192.168.7.195', 8080))
     server = await websockets.serve(echo, "0.0.0.0", 8001)
     asyncio.create_task(repeated_task())  
     print("✅ Server started on ws://localhost:8001")

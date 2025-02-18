@@ -1,4 +1,9 @@
 #include "Zoom.h"
+#include "util/WebSocketClient.h"
+#include "util/json.hpp"
+
+
+extern WebSocketClient* g_webSocketClient;
 
 
 SDKError Zoom::config(int ac, char** av) {
@@ -114,7 +119,7 @@ SDKError Zoom::join() {
         Log::error("Display Name cannot be blank");
         return err;
     }
-
+    
     m_meetingID = mid; // Store the meeting ID in the member variable
 
     auto meetingNumber = stoull(mid);
@@ -151,6 +156,13 @@ SDKError Zoom::join() {
 
         audioSettings->EnableAutoJoinAudio(true);
     }
+
+    nlohmann::json message = {
+        {"action", "connection"},
+        {"meeting_id", mid}
+    };
+    g_webSocketClient->send(message.dump());
+
 
     return m_meetingService->Join(joinParam);
 }

@@ -51,10 +51,14 @@ build() {
 }
 
 run() {
-    exec ./"$BUILD"/zoomsdk
+    # Capture all arguments passed to the script
+    echo "Arguments received: $@"
+
+    # Ensure that the executable is called with the passed arguments
+    exec ./"$BUILD"/zoomsdk "$@"
 }
 
-build && run;
+build && run "$@";
 
 exit $?
 

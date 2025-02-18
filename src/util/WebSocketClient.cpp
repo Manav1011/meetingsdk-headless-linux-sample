@@ -60,3 +60,13 @@ void WebSocketClient::sendBinary(const void* data, size_t len) {
 void WebSocketClient::setMessageHandler(std::function<void(const std::string&)> handler) {
     m_messageHandler = handler;
 }
+
+void WebSocketClient::close() {
+    if (m_connected) {
+        m_client.close(m_hdl, websocketpp::close::status::going_away, "");
+        if (m_thread.joinable()) {
+            m_thread.join();
+        }
+        m_connected = false;
+    }
+}

@@ -59,6 +59,8 @@ add_executable(zoomsdk src/main.cpp
         src/util/SocketServer.cpp
         src/util/WebSocketClient.cpp
         src/util/WebSocketClient.h
+        src/util/UDPSocketClient.cpp
+        src/util/UDPSocketClient.h
         src/util/json.hpp
 )
 

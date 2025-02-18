@@ -1,5 +1,6 @@
 #include "ZoomSDKAudioRawDataDelegate.h"
 #include "../util/WebSocketClient.h"
+#include "../util/UDPSocketClient.h"
 #include <iostream>
 #include "../util/json.hpp"
 #include <vector>
@@ -16,9 +17,12 @@
 #include "../Zoom.h" // Assuming Zoom.h contains the getMeetingService() method
 
 #include "../Config.h"
+#include <boost/asio.hpp>
 
 
 extern WebSocketClient* g_webSocketClient;
+extern UDPSocketClient* g_udpSocketClient;
+
 using json = nlohmann::json;
 
 std::string base64_encode(const uint8_t* buffer, size_t length) {
@@ -92,25 +96,37 @@ ZoomSDKAudioRawDataDelegate::ZoomSDKAudioRawDataDelegate(bool useMixedAudio = tr
 // }
 
 void ZoomSDKAudioRawDataDelegate::onMixedAudioRawDataReceived(AudioRawData* data) {
-    if (g_webSocketClient) {
+    if (g_udpSocketClient) {
         std::string audioBase64 = base64_encode(reinterpret_cast<const uint8_t*>(data->GetBuffer()), data->GetBufferLen());
-        // Get the meeting ID
         std::string meetingID = Zoom::getInstance().getMeetingID();
         std::string timestamp = getCurrentTimestamp();
         nlohmann::json audioPacket = {
-            {"action","stream_mixed"},
+            {"action", "stream_mixed"},
             {"meeting_id", meetingID},
             {"audio", audioBase64},
-            {"timestamp", timestamp}        
+            {"timestamp", timestamp}
         };
         std::string jsonString = audioPacket.dump();
-        g_webSocketClient->send(jsonString);
+        g_udpSocketClient->send(jsonString);
     }
+    // if (g_webSocketClient) {
+    //     std::string audioBase64 = base64_encode(reinterpret_cast<const uint8_t*>(data->GetBuffer()), data->GetBufferLen());
+    //     // Get the meeting ID
+    //     std::string meetingID = Zoom::getInstance().getMeetingID();
+    //     std::string timestamp = getCurrentTimestamp();
+    //     nlohmann::json audioPacket = {
+    //         {"action","stream_mixed"},
+    //         {"meeting_id", meetingID},
+    //         {"audio", audioBase64},
+    //         {"timestamp", timestamp}        
+    //     };
+    //     std::string jsonString = audioPacket.dump();
+    //     g_webSocketClient->send(jsonString);
+    // }
 }
 
 void ZoomSDKAudioRawDataDelegate::onOneWayAudioRawDataReceived(AudioRawData* data, uint32_t node_id) {
-    if (g_webSocketClient) {
-        // Encode audio data in Base64
+    if (g_udpSocketClient) {
         std::string audioBase64 = base64_encode(reinterpret_cast<const uint8_t*>(data->GetBuffer()), data->GetBufferLen());
         IMeetingParticipantsController* participantsController = Zoom::getInstance().getMeetingService()->GetMeetingParticipantsController();
         Config config;
@@ -136,11 +152,43 @@ void ZoomSDKAudioRawDataDelegate::onOneWayAudioRawDataReceived(AudioRawData* dat
                     };
                     std::string jsonString = audioPacket.dump();
                     // Send JSON
-                    g_webSocketClient->send(jsonString);
+                    g_udpSocketClient->send(jsonString);
                 }
             }
         }
     }
+    // if (g_webSocketClient) {
+    //     // Encode audio data in Base64
+    //     std::string audioBase64 = base64_encode(reinterpret_cast<const uint8_t*>(data->GetBuffer()), data->GetBufferLen());
+    //     IMeetingParticipantsController* participantsController = Zoom::getInstance().getMeetingService()->GetMeetingParticipantsController();
+    //     Config config;
+    //     // Get the meeting ID
+    //     std::string meetingID = Zoom::getInstance().getMeetingID();
+    //     // std::cout << "Meeting ID: " << meetingID << std::endl;
+    //     if (participantsController) {
+    //         IUserInfo* userInfo = participantsController->GetUserByUserID(node_id);
+    //         if (userInfo) {
+    //             std::string userName = userInfo->GetUserName();
+    //             std::string timestamp = getCurrentTimestamp();
+    //             // std::cout << "User Name: " << userName << std::endl;
+    //             if (userName != "ZoomBot"){
+    //                 std::string timestamp = getCurrentTimestamp();
+    //                 // Create JSON payload
+    //                 nlohmann::json audioPacket = {
+    //                     {"action","stream_individual"},
+    //                     {"username", userName},
+    //                     {"meeting_id", meetingID},
+    //                     {"node_id", node_id},
+    //                     {"audio", audioBase64},
+    //                     {"timestamp", timestamp}  // Add timestamp
+    //                 };
+    //                 std::string jsonString = audioPacket.dump();
+    //                 // Send JSON
+    //                 g_webSocketClient->send(jsonString);
+    //             }
+    //         }
+    //     }
+    // }
 }
 
 // void ZoomSDKAudioRawDataDelegate::onOneWayAudioRawDataReceived(AudioRawData* data, uint32_t node_id) {

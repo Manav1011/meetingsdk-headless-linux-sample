@@ -73,5 +73,3 @@ ENV CMAKE_TOOLCHAIN_FILE=/opt/vcpkg/scripts/buildsystems/vcpkg.cmake
 ENV VCPKG_ROOT=/opt/vcpkg
 
 ENTRYPOINT ["/tini", "--", "./bin/entry.sh"]
-
-

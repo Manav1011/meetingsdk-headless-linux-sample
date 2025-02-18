@@ -6,6 +6,15 @@
 using json = nlohmann::json;
 extern WebSocketClient* g_webSocketClient;
 
+void cleanup() {
+    // Perform any necessary cleanup tasks here
+    if (g_webSocketClient) {
+        g_webSocketClient->close(); // Close the WebSocket connection
+        delete g_webSocketClient;   // Delete the WebSocket client object
+        g_webSocketClient = nullptr;
+    }
+}
+
 
 void MeetingServiceEvent::onMeetingStatusChanged(MeetingStatus status, int iResult) {
     if (m_onMeetingStatusChanged) {
@@ -18,7 +27,7 @@ void MeetingServiceEvent::onMeetingStatusChanged(MeetingStatus status, int iResu
     auto result = ss.str();
 
     std::string meetingID; // Declare meetingID outside the switch statement
-
+    auto* zoom = &Zoom::getInstance();
     switch (status) {
         case MEETING_STATUS_CONNECTING:
             Log::info("connecting to the meeting");
@@ -45,6 +54,10 @@ void MeetingServiceEvent::onMeetingStatusChanged(MeetingStatus status, int iResu
                 };
                 g_webSocketClient->send(message.dump());
             }
+            cleanup(); // Perform cleanup before exiting
+            zoom->leave();
+            zoom->clean();
+            exit(0);
             return;
         case MEETING_STATUS_FAILED:
             Log::error("failed to connect to the meeting with MeetingFailCode " + result);

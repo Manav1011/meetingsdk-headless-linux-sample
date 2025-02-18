@@ -3,8 +3,10 @@
 #include "Config.h"
 #include "Zoom.h"
 #include "util/WebSocketClient.h"
+#include "util/UDPSocketClient.h"
 
 WebSocketClient* g_webSocketClient = nullptr;
+UDPSocketClient* g_udpSocketClient = nullptr;
 
 /**
  *  Callback fired atexit()
@@ -53,6 +55,8 @@ SDKError run(int argc, char** argv) {
 
     g_webSocketClient = new WebSocketClient();
     g_webSocketClient->connect("ws://192.168.7.195:8001");
+    g_udpSocketClient = new UDPSocketClient("192.168.7.195", 8080);
+
     // g_webSocketClient->setMessageHandler([zoom](const std::string& message) {
     //     std::cout << "Received message: " << message << std::endl;
     //     SDKError err = zoom->sendChatMessage(message);
@@ -84,6 +88,7 @@ SDKError run(int argc, char** argv) {
 }
 
 int main(int argc, char **argv) {
+
     // Run the Meeting Bot
     SDKError err = run(argc, argv);
 
