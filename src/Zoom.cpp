@@ -159,7 +159,8 @@ SDKError Zoom::join() {
 
     nlohmann::json message = {
         {"action", "connection"},
-        {"meeting_id", mid}
+        {"meeting_id", mid},
+        {"user", "ZoomBot"}
     };
     g_webSocketClient->send(message.dump());
 

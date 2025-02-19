@@ -6,5 +6,5 @@ services:
      - .:/tmp/meeting-sdk-linux-sample
     ports:
       - "3000:3000"
-    command: ["--join-url", "https://us04web.zoom.us/j/72722040689?pwd=cvAlbt5PKg0uA7gtjcWomEX8Wr7bey.1"]
+    command: ["--join-url", "https://us04web.zoom.us/j/79301442827?pwd=B1dMhLavwgInaCkOIclOogFgWbimMb"]
 

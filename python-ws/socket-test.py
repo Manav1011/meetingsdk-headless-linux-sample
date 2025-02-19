@@ -43,6 +43,8 @@ result_queue = multiprocessing.Queue()
 NUM_WORKERS = min(6, multiprocessing.cpu_count())  # Adjust based on CPU cores & memory
 
 active_connections = dict()
+waiting_connections = dict()
+silence_durations = dict()
 
 def split_into_chunks(text, chunk_size=5000, tolerance=1000):
     chunks = []
@@ -60,6 +62,42 @@ def split_into_chunks(text, chunk_size=5000, tolerance=1000):
         start = end
     return chunks
 
+async def start_sdk(join_url,meeting_id):
+    reader, writer = await asyncio.open_connection('192.168.7.70', 9001)
+    command = {"action": "start_sdk","join_url":join_url,'meeting_id':meeting_id}
+    writer.write(json.dumps(command).encode())
+    await writer.drain()
+    writer.close()
+    await writer.wait_closed()
+
+def generate_icebreakers():
+    messages = [
+        {
+            "role": "system",
+            "content": """
+                - You are a **meeting facilitator** ensuring discussions stay engaging and on track.
+                - Generate **5 creative icebreaker questions** when the meeting becomes unproductive or silent.
+                - The questions should be **fun, thought-provoking, or contextually relevant**, encouraging participation.
+                - Keep a **friendly, professional tone**, avoiding sensitive or controversial topics.
+                - Format output in **beautiful Markdown** with emojis for engagement:
+                ```
+                ## 🎤 Icebreaker Questions  
+                - 🤔 Question 1: [Text]  
+                - 💡 Question 2: [Text]  
+                - 🎭 Question 3: [Text]  
+                - 🌍 Question 4: [Text]  
+                - 🚀 Question 5: [Text]  
+                ```
+            """
+        },
+        {"role": "system", "content": "temperature: 0.7"},
+        {"role": "user", "content": "Generate 5 icebreaker questions in Markdown format."}
+    ]
+    response = text_model.generate_content(json.dumps(messages))
+    return response.text
+
+
+
 def query_llm(chunk):
     """
     Sends conversation chunks to the LLM for summarization, ensuring context is preserved 
@@ -74,7 +112,8 @@ def query_llm(chunk):
         "role": "system",
         "content": """
             - You are a professional meeting assistant tasked with summarizing the meeting **up to the point** when the user presses the "Get Summary" button.
-            - Focus on extracting the most important discussion points, decisions, and action items from the meeting so far, while excluding minor details or off-topic conversation.
+            - Focus on extracting the most importa
+            nt discussion points, decisions, and action items from the meeting so far, while excluding minor details or off-topic conversation.
             - Your summary should include the following sections:
             - **Meeting Summary - [Date]**
             - **Attendees:** List of participants.
@@ -123,18 +162,18 @@ def generate_final_summary(summaries, recursion_depth=0, max_recursion=10):
     if recursion_depth >= max_recursion:
         combined_summary = ' '.join(summaries)
         response = query_llm([combined_summary])
-        return response['summary']
+        return response
 
     concated_summary = ' '.join(summaries)
     sub_summaries = split_into_chunks(concated_summary)
     if len(sub_summaries) == 1:
         response = query_llm(sub_summaries[0])
-        final_summary = response['summary']
+        final_summary = response
         return final_summary
     new_summaries = []
     for summary in sub_summaries:
         response = query_llm(summary)
-        new_summaries.append(response['summary'])
+        new_summaries.append(response)
     return generate_final_summary(new_summaries, recursion_depth + 1)
 
 def generate_summary_till_now(meeting_id):
@@ -183,7 +222,7 @@ def generate_summary_till_now(meeting_id):
     summaries = []
     for chunk in chunks:
         response = query_llm(chunk)
-        summaries.append(response['summary'])
+        summaries.append(response)
     final_summary = generate_final_summary(summaries)
     return final_summary
 
@@ -233,7 +272,7 @@ def generate_summary(meeting_id):
     summaries = []
     for chunk in chunks:
         response = query_llm(chunk)
-        summaries.append(response['summary'])
+        summaries.append(response)
 
     final_summary = generate_final_summary(summaries)
     print(final_summary)
@@ -280,7 +319,7 @@ def transcriber_process(audio_queue, result_queue):
                 break  
             
             wav_file, user, chunk_time = item  
-            segments, _ = model.transcribe(wav_file, language='en')
+            segments, _ = model.transcribe(wav_file)
             transcript = " ".join(segment.text for segment in segments)
 
             if not transcript.strip():  # ✅ Handle Empty Transcriptions
@@ -298,7 +337,7 @@ def transcriber_process(audio_queue, result_queue):
             print(f"❌ Error in transcription process: {e}")
             conn.rollback()
 
-async def detect_silence(meeting_id,audio_bytes):
+async def detect_silence(meeting_id,audio_bytes,silence_duration_preset):
     """Detect silence and notify the client if it exceeds 5 seconds."""
     global silence_start, silence_duration, last_silence_notification  
 
@@ -316,17 +355,26 @@ async def detect_silence(meeting_id,audio_bytes):
         if silence_start is None:
             silence_start = time.time()
         silence_duration = time.time() - silence_start
-        if silence_duration >= 5:
+        if silence_duration >= int(silence_duration_preset):
             current_time = time.time()
             if last_silence_notification == 0 or (current_time - last_silence_notification >= silence_notification_interval):
-                print("⚠️ Silence detected for more than 5 seconds!")
-                message = {'action':'notify','message':'Silence Detected For 5 seconds'}
-                clients = active_connections[meeting_id]
-                for client in clients:
-                    try:
-                        await client.send(json.dumps(message))
-                    except Exception as e:
-                        print(f"⚠️ Error sending message to a client: {e}")
+                print(f"⚠️ Silence detected for more than {silence_duration_preset} seconds!")
+                if meeting_id in active_connections:
+                    clients = [active_connections[meeting_id].get('host',None)] + active_connections[meeting_id].get('participants',[])
+                    if len(clients) > 0:
+                        # generate_icebreakers
+                        excercise = generate_icebreakers()
+                        message = {
+                            'action': 'notify',
+                            'message': f'📢 **Silence Detected!** ⏳ Duration: {silence_duration_preset} seconds',
+                            'excercise':excercise
+                        }
+                        for client in clients:
+                            try:
+                                if client:
+                                    await client.send(json.dumps(message))
+                            except Exception as e:
+                                print(f"⚠️ Error sending message to a client: {e}")
                 last_silence_notification = current_time  
     else:
         silence_start = None  
@@ -348,13 +396,41 @@ class EchoServerProtocol:
         data = json.loads(message)
         if data['action'] == 'stream_mixed':
             audio_bytes = base64.b64decode(data['audio'])
-            # print('mixed audio')
-            await detect_silence(data['meeting_id'],audio_bytes)
+            await detect_silence(data['meeting_id'],audio_bytes,silence_durations[data['meeting_id']])
         if data['action'] == 'stream_individual':
             audio_bytes = base64.b64decode(data['audio'])
             audio_data[f"{data['meeting_id']}_{data['node_id']}_{data['username']}"].append((data['timestamp'], audio_bytes))
 
+def remove_connection(connection):
+    global active_connections
+
+    keys_to_remove = []
+
+    for meeting_id, connections in list(active_connections.items()):
+        if isinstance(connections, dict):  
+            # Remove from 'participants' list if present
+            if 'participants' in connections and connection in connections['participants']:
+                connections['participants'].remove(connection)
+                if not connections['participants']:  # Remove key if empty
+                    del connections['participants']
+
+            # Remove if connection is stored directly under 'host' or 'bot'
+            if connections.get('host') == connection:
+                del connections['host']
+            if connections.get('bot') == connection:
+                del connections['bot']
+
+            # If the meeting ID has no remaining connections, mark it for removal
+            if not connections:
+                keys_to_remove.append(meeting_id)
+
+    # Remove empty meeting IDs
+    for meeting_id in keys_to_remove:
+        del active_connections[meeting_id]
+
+
 async def echo(websocket):
+    global active_connections
     # active_connections.add(websocket)
     print(f"🔗 New connection: {websocket.remote_address}")
     try:
@@ -366,13 +442,41 @@ async def echo(websocket):
                 if data['action'] == 'connection':
                     meeting_id = data['meeting_id']
                     if meeting_id not in active_connections:
-                        active_connections[meeting_id] = [websocket]
+                        active_connections[meeting_id] = {}
+                        if data['user'] == 'host':
+                            # here we have to start the zoom bot
+                            active_connections[meeting_id]['host'] = websocket
+                            # add the silence duration
+                            silence_durations[meeting_id] = data['silence_duration']
+                            # add the participatns
+                            if meeting_id in waiting_connections:
+                                active_connections[meeting_id]['participants'] = []
+                                for participant in waitning_connections[meeting_id]:
+                                    active_connections[meeting_id]['participants'].append(participant)
+                                del waitning_connections[meeting_id]
+                            # start the sdk
+                            join_url = data['join_url']
+                            await start_sdk(join_url,meeting_id)
+                        else:
+                            # add them to waiting area
+                            if meeting_id not in waiting_connections:
+                                waiting_connections[meeting_id] = [websocket]
+                            else:
+                                waiting_connections[meeting_id].append(websocket)
                     else:
-                        active_connections[meeting_id].append(websocket)
+                        # if data['user'] == 'ZoomBot':
+                        #     active_connections[meeting_id]['bot'] = websocket
+                        if data['user'] == 'participant':
+                            if 'participants' not in active_connections[meeting_id]:
+                                active_connections[meeting_id]['participants'] = [websocket]
+                            else:
+                                active_connections[meeting_id]['participants'].append(websocket)
+                        # if data['user'] == 'host':
+                        #     active_connections[meeting_id]['host'] = websocket
+                        # active_connections[meeting_id].append(websocket)
                 if data['action'] == 'meeting_ended':
                     # here we have to end the audio buffer for meeting
                     del active_connections[meeting_id]
-                    print(active_connections)
                     asyncio.create_task(process_leftout_buffer(meeting_id=data['meeting_id']))
                     summary_process = multiprocessing.Process(target=generate_summary, args=(data['meeting_id'],))
                     summary_process.start()
@@ -382,16 +486,21 @@ async def echo(websocket):
     except Exception as e:
         print(f"❌ Error: {e}")
     finally:
+        remove_connection(websocket)
+        print(active_connections)
         print(f"🔌 Connection closed: {websocket.remote_address}")
 
 async def get_summary_till_now(meeting_id,websocket):
     final_summary = generate_summary_till_now(meeting_id)
     message = {'action':'notify','message':final_summary}
-    for client in active_connections:
-        try:
-            await client.send(json.dumps(message))
-        except Exception as e:
-            print(f"⚠️ Error sending message to a client: {e}")
+    if meeting_id in active_connections:
+        clients = [active_connections[meeting_id].get('host',None)] + active_connections[meeting_id].get('participants',[])
+        for client in clients:
+            try:
+                if client:
+                    await client.send(json.dumps(message))
+            except Exception as e:
+                print(f"⚠️ Error sending message to a client: {e}")
 
 
 async def process_leftout_buffer(meeting_id):
