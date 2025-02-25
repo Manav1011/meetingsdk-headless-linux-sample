@@ -15,17 +15,20 @@ from queue import Empty  # Fix queue exception handling
 from faster_whisper import WhisperModel
 import psycopg2
 import psycopg2.extras
-import google.generativeai as genai
-genai.configure(api_key="AIzaSyD0vLS27RzUfBTiFb3lv4tbxsS10BL3Sio")
-text_model = genai.GenerativeModel("gemini-1.5-flash-8b")
+from dotenv import load_dotenv
+from openai import OpenAI
 import json
 import re
+import logging
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+
+load_dotenv()  # take environment variables from .env.
+client = OpenAI()
 
 # 🔧 Silence Detection Config
 silence_threshold = 2000  
-silence_start = None  
-silence_duration = 0  
-last_silence_notification = 0  
+# silence_start = None  
+# silence_duration = 0  
 silence_notification_interval = 60*10
 
 # 🔧 PCM Properties
@@ -44,7 +47,11 @@ NUM_WORKERS = min(6, multiprocessing.cpu_count())  # Adjust based on CPU cores &
 
 active_connections = dict()
 waiting_connections = dict()
+silence_durations_presets = dict()
+icebreaker_modes = dict()
 silence_durations = dict()
+last_silence_notification = dict()
+silence_start_map = dict()
 
 def split_into_chunks(text, chunk_size=5000, tolerance=1000):
     chunks = []
@@ -63,7 +70,7 @@ def split_into_chunks(text, chunk_size=5000, tolerance=1000):
     return chunks
 
 async def start_sdk(join_url,meeting_id):
-    reader, writer = await asyncio.open_connection('192.168.7.70', 9001)
+    reader, writer = await asyncio.open_connection('192.168.7.195', 9001)
     command = {"action": "start_sdk","join_url":join_url,'meeting_id':meeting_id}
     writer.write(json.dumps(command).encode())
     await writer.drain()
@@ -71,32 +78,62 @@ async def start_sdk(join_url,meeting_id):
     await writer.wait_closed()
 
 def generate_icebreakers():
-    messages = [
-        {
-            "role": "system",
-            "content": """
-                - You are a **meeting facilitator** ensuring discussions stay engaging and on track.
-                - Generate **5 creative icebreaker questions** when the meeting becomes unproductive or silent.
-                - The questions should be **fun, thought-provoking, or contextually relevant**, encouraging participation.
-                - Keep a **friendly, professional tone**, avoiding sensitive or controversial topics.
-                - Format output in **beautiful Markdown** with emojis for engagement:
-                ```
-                ## 🎤 Icebreaker Questions  
-                - 🤔 Question 1: [Text]  
-                - 💡 Question 2: [Text]  
-                - 🎭 Question 3: [Text]  
-                - 🌍 Question 4: [Text]  
-                - 🚀 Question 5: [Text]  
-                ```
-            """
-        },
-        {"role": "system", "content": "temperature: 0.7"},
-        {"role": "user", "content": "Generate 5 icebreaker questions in Markdown format."}
-    ]
-    response = text_model.generate_content(json.dumps(messages))
-    return response.text
+    completion = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages = [
+            {
+                "role": "system",
+                "content": """
+                    - You are a **meeting facilitator** ensuring discussions stay engaging and on track.
+                    - Generate **some creative icebreaker questions** when the meeting becomes unproductive or silent.
+                    - The questions should be **fun, thought-provoking, or contextually relevant**, encouraging participation.
+                    - Keep a **friendly, professional tone**, avoiding sensitive or controversial topics.
+                    - Format output in **beautiful Markdown** with emojis for engagement:
+                    ```
+                    ## 🎤 Icebreaker Questions Format - 🤔(any appropriate emogi) Question 1: [Text]
+                    ```
+                """
+            },
+            {"role": "system", "content": "temperature: 0.7"},
+            {"role": "user", "content": "Generate 1 or 2 icebreaker questions in Markdown format."}
+        ]
+    )
+    response = completion.choices[0].message
+    # Print token usage
+    logging.info(f"General Icebreakers Input Tokens: {completion.usage.prompt_tokens}")
+    logging.info(f"General Icebreakers Output Tokens: {completion.usage.completion_tokens}")
+    logging.info(f"General Icebreakers Total Tokens: {completion.usage.total_tokens}")
+    return response.content
 
-
+def generate_questions_from_summary(summary):
+    completion = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages = [
+                {
+                    "role": "system",
+                    "content": """
+                        - You are a **meeting facilitator** ensuring discussions stay engaging and on track.
+                        - Based on the provided **meeting summary**, **generate some creative icebreaker questions** relevant to the topics discussed.
+                        - Keep a **friendly, professional tone**, avoiding sensitive or controversial topics.
+                        - Format output in **beautiful Markdown** with emojis for engagement:
+                        ```
+                        ## 🎤 Icebreaker Questions Format - 🤔(any appropriate emogi) Question 1: [Text]
+                        ```
+                    """
+                },
+                {"role": "system", "content": "temperature: 0.7"},
+                {"role": "user", "content": f"Generate 5 icebreaker questions based on this meeting summary:\n{summary}"}
+            ]
+    )
+    
+    # Generate response from LLM
+    response = completion.choices[0].message
+    logging.info(f"Topic :{summary}")
+    # Print token usage
+    logging.info(f"Topic IcebreakersInput Tokens: {completion.usage.prompt_tokens}")
+    logging.info(f"Topic Icebreakers Output Tokens: {completion.usage.completion_tokens}")
+    logging.info(f"Topic Icebreakers Total Tokens: {completion.usage.total_tokens}")
+    return response.content
 
 def query_llm(chunk):
     """
@@ -107,33 +144,41 @@ def query_llm(chunk):
     # Combine chunks into a single context strin
 
     # Construct system and user messages
-    messages = [
-        {
-        "role": "system",
-        "content": """
-            - You are a professional meeting assistant tasked with summarizing the meeting **up to the point** when the user presses the "Get Summary" button.
-            - Focus on extracting the most importa
-            nt discussion points, decisions, and action items from the meeting so far, while excluding minor details or off-topic conversation.
-            - Your summary should include the following sections:
-            - **Meeting Summary - [Date]**
-            - **Attendees:** List of participants.
-            - **Key Discussion Points:** Bullet points summarizing the key topics discussed up until now. Focus on high-level takeaways.
-            - **Decisions:** Bullet points listing key decisions made during the meeting.
-            - **Action Items:** Bullet points specifying tasks assigned to individuals, clearly labeled with responsible person(s).
-            - Use **bold** for key topics, decisions, and action items.
-            - Keep the tone professional and concise, suitable for business documentation.
-            - Ensure the **date** is automatically filled in based on the provided input.
-            - The summary should be generated **dynamically as the meeting progresses**, but finalized only when the user requests the summary.
-            - If any part of the meeting is in a language other than English, please **translate it into English** in the summary.
-        """
-        },
-        {"role": "system", "content": "temperature: 0"},  # Higher temperature for better context inference
-        {"role": "user", "content": chunk}
-    ]
+    completion = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages = [
+            {
+            "role": "system",
+            "content": """
+                - You are a professional meeting assistant tasked with summarizing the meeting **up to the point** when the user presses the "Get Summary" button.
+                - Focus on extracting the most importa
+                nt discussion points, decisions, and action items from the meeting so far, while excluding minor details or off-topic conversation.
+                - Your summary should include the following sections:
+                - **Meeting Summary - [Date]**
+                - **Attendees:** List of participants.
+                - **Key Discussion Points:** Bullet points summarizing the key topics discussed up until now. Focus on high-level takeaways.
+                - **Decisions:** Bullet points listing key decisions made during the meeting.
+                - **Action Items:** Bullet points specifying tasks assigned to individuals, clearly labeled with responsible person(s).
+                - Use **bold** for key topics, decisions, and action items.
+                - Keep the tone professional and concise, suitable for business documentation.
+                - Ensure the **date** is automatically filled in based on the provided input.
+                - The summary should be generated **dynamically as the meeting progresses**, but finalized only when the user requests the summary.
+                - If any part of the meeting is in a language other than English, please **translate it into English** in the summary.
+            """
+            },
+            {"role": "system", "content": "temperature: 0"},  # Higher temperature for better context inference
+            {"role": "user", "content": chunk}
+        ]
+    )
 
     # Generate response from LLM
-    response = text_model.generate_content(json.dumps(messages))
-    return response.text
+    response = completion.choices[0].message
+    logging.info(f"Chunk :{chunk}")
+    # Print token usage
+    logging.info(f"Input Tokens: {completion.usage.prompt_tokens}")
+    logging.info(f"Output Tokens: {completion.usage.completion_tokens}")
+    logging.info(f"Total Tokens: {completion.usage.total_tokens}")
+    return response.content
     # Extract JSON from response
     # match = re.search(r"\{.*\}", response.text, re.DOTALL)  # Matches curly braces and content inside
     # if match:
@@ -181,7 +226,7 @@ def generate_summary_till_now(meeting_id):
                 dbname="dockertestdb",
                 user="manav1011",
                 password="Manav@1011",
-                host="192.168.7.70",
+                host="192.168.7.195",
                 port=5432
     )
 
@@ -215,7 +260,7 @@ def generate_summary_till_now(meeting_id):
         conversation+=text
     if len(conversation.strip()) <= 0:
         print('No conversation provided')
-        return
+        return None
     # Now the chunking of 5000 tokens each
     chunks = split_into_chunks(conversation)
     
@@ -231,7 +276,7 @@ def generate_summary(meeting_id):
                 dbname="dockertestdb",
                 user="manav1011",
                 password="Manav@1011",
-                host="192.168.7.70",
+                host="192.168.7.195",
                 port=5432
     )
 
@@ -297,7 +342,7 @@ def transcriber_process(audio_queue, result_queue):
             dbname="dockertestdb",
             user="manav1011",
             password="Manav@1011",
-            host="192.168.7.70",
+            host="192.168.7.195",
             port=5432
         )
         cur = conn.cursor()
@@ -319,12 +364,14 @@ def transcriber_process(audio_queue, result_queue):
                 break  
             
             wav_file, user, chunk_time = item  
-            segments, _ = model.transcribe(wav_file)
+            segments, info = model.transcribe(wav_file,language='en')
             transcript = " ".join(segment.text for segment in segments)
 
             if not transcript.strip():  # ✅ Handle Empty Transcriptions
                 print("⚠️ Skipping empty transcription")
                 continue
+            detected_language = info.language
+            print(f"Detected Language: {detected_language}")
             print(f"Transcript: {transcript}")
             meeting_id, user_id, username = user.split("_")  
             cur.execute("EXECUTE insert_transcription (%s, %s, %s, %s, %s)", 
@@ -337,10 +384,17 @@ def transcriber_process(audio_queue, result_queue):
             print(f"❌ Error in transcription process: {e}")
             conn.rollback()
 
-async def detect_silence(meeting_id,audio_bytes,silence_duration_preset):
-    """Detect silence and notify the client if it exceeds 5 seconds."""
-    global silence_start, silence_duration, last_silence_notification  
+async def broadcast(message, clients):
+    for client in clients.copy():  # Use a copy to avoid modification during iteration
+        try:
+            await client.send(json.dumps(message))
+        except Exception as e:
+            print(f"⚠️ Error sending message to a client: {e}")
+            clients.remove(client)  # Remove clients that can't be reached
+            
 
+async def detect_silence(meeting_id,audio_bytes,silence_duration_preset,icebreaker_mode):
+    """Detect silence and notify the client if it exceeds 5 seconds."""
     if not audio_bytes:  
         print("⚠️ Warning: Empty audio frame received!")
         return  
@@ -352,33 +406,55 @@ async def detect_silence(meeting_id,audio_bytes,silence_duration_preset):
         print("⚠️ Warning: Computed RMS is NaN!")
         return
     if rms < silence_threshold:
-        if silence_start is None:
-            silence_start = time.time()
-        silence_duration = time.time() - silence_start
-        if silence_duration >= int(silence_duration_preset):
+        if silence_start_map[meeting_id] is None:
+            silence_start_map[meeting_id] = time.time()
+        silence_durations[meeting_id] = time.time() - silence_start_map[meeting_id]
+        if silence_durations[meeting_id] >= int(silence_duration_preset):
             current_time = time.time()
-            if last_silence_notification == 0 or (current_time - last_silence_notification >= silence_notification_interval):
-                print(f"⚠️ Silence detected for more than {silence_duration_preset} seconds!")
+            if last_silence_notification[meeting_id] == 0 or (current_time - last_silence_notification[meeting_id] >= silence_notification_interval):
+                # print(last_silence_notification[meeting_id])
                 if meeting_id in active_connections:
                     clients = [active_connections[meeting_id].get('host',None)] + active_connections[meeting_id].get('participants',[])
                     if len(clients) > 0:
                         # generate_icebreakers
-                        excercise = generate_icebreakers()
-                        message = {
-                            'action': 'notify',
-                            'message': f'📢 **Silence Detected!** ⏳ Duration: {silence_duration_preset} seconds',
-                            'excercise':excercise
-                        }
-                        for client in clients:
-                            try:
-                                if client:
-                                    await client.send(json.dumps(message))
-                            except Exception as e:
-                                print(f"⚠️ Error sending message to a client: {e}")
-                last_silence_notification = current_time  
+                        if icebreaker_mode == 'common':
+                            excercise = generate_icebreakers()
+                            message = {
+                                    'action': 'notify',
+                                    'message': f'📢 **Silence Detected!** ⏳ Duration: {silence_duration_preset} seconds',
+                                    'excercise':excercise
+                            }
+                            for client in clients:
+                                try:
+                                    if client:
+                                        await client.send(json.dumps(message))
+                                except Exception as e:
+                                    print(f"⚠️ Error sending message to a client: {e}")
+                        else:
+                            final_summary = generate_summary_till_now(meeting_id)
+                            if final_summary:
+                                excercise = generate_questions_from_summary(final_summary)
+                                message = {
+                                    'action': 'notify',
+                                    'message': f'📢 **Silence Detected!** ⏳ Duration: {silence_duration_preset} seconds',
+                                    'excercise':excercise
+                                }
+                            else:
+                                message = {
+                                    'action': 'notify',
+                                    'message': f'📢 **Silence Detected!** ⏳ Duration: {silence_duration_preset} seconds',
+                                    'excercise':'No conversation yet!!'
+                                }
+                            for client in clients:
+                                try:
+                                    if client:
+                                        await client.send(json.dumps(message))
+                                except Exception as e:
+                                    print(f"⚠️ Error sending message to a client: {e}")
+                last_silence_notification[meeting_id] = current_time  
     else:
-        silence_start = None  
-        last_silence_notification = 0  
+        silence_start_map[meeting_id] = None  
+        last_silence_notification[meeting_id] = 0  
 
 class EchoServerProtocol:
     def connection_made(self, transport):
@@ -396,39 +472,55 @@ class EchoServerProtocol:
         data = json.loads(message)
         if data['action'] == 'stream_mixed':
             audio_bytes = base64.b64decode(data['audio'])
-            await detect_silence(data['meeting_id'],audio_bytes,silence_durations[data['meeting_id']])
+            await detect_silence(data['meeting_id'],audio_bytes,silence_durations_presets[data['meeting_id']],icebreaker_modes[data['meeting_id']])
         if data['action'] == 'stream_individual':
             audio_bytes = base64.b64decode(data['audio'])
             audio_data[f"{data['meeting_id']}_{data['node_id']}_{data['username']}"].append((data['timestamp'], audio_bytes))
 
-def remove_connection(connection):
-    global active_connections
+# def remove_connection(connection):
+#     global active_connections
 
-    keys_to_remove = []
+#     keys_to_remove = []
 
-    for meeting_id, connections in list(active_connections.items()):
-        if isinstance(connections, dict):  
-            # Remove from 'participants' list if present
-            if 'participants' in connections and connection in connections['participants']:
-                connections['participants'].remove(connection)
-                if not connections['participants']:  # Remove key if empty
-                    del connections['participants']
+#     for meeting_id, connections in list(active_connections.items()):
+#         if isinstance(connections, dict):  
+#             # Remove from 'participants' list if present
+#             if 'participants' in connections and connection in connections['participants']:
+#                 connections['participants'].remove(connection)
+#                 if not connections['participants']:  # Remove key if empty
+#                     del connections['participants']
 
-            # Remove if connection is stored directly under 'host' or 'bot'
-            if connections.get('host') == connection:
-                del connections['host']
-            if connections.get('bot') == connection:
-                del connections['bot']
+#             # Remove if connection is stored directly under 'host' or 'bot'
+#             if connections.get('host') == connection:
+#                 del connections['host']
+#             if connections.get('bot') == connection:
+#                 del connections['bot']
 
-            # If the meeting ID has no remaining connections, mark it for removal
-            if not connections:
-                keys_to_remove.append(meeting_id)
+#             # If the meeting ID has no remaining connections, mark it for removal
+#             if not connections:
+#                 keys_to_remove.append(meeting_id)
 
-    # Remove empty meeting IDs
-    for meeting_id in keys_to_remove:
-        del active_connections[meeting_id]
+#     # Remove empty meeting IDs
+#     for meeting_id in keys_to_remove:
+#         del active_connections[meeting_id]
 
-
+async def notify_client_about_meeting_end(meeting_id):
+    if meeting_id not in active_connections:return
+    clients = active_connections[meeting_id]
+    message = {'action':'meeting_ended'}
+    # hosts
+    if 'host' in clients:
+        try:
+            if clients['host']:await clients['host'].send(json.dumps(message))
+        except Exception as e:
+            print(f"⚠️ Error sending message to a client: {e}")
+    if 'participants' in clients:
+        for participant in clients['participants']:
+            try:
+                if participant:await participant.send(json.dumps(message))
+            except Exception as e:
+                print(f"⚠️ Error sending message to a client: {e}")
+    
 async def echo(websocket):
     global active_connections
     # active_connections.add(websocket)
@@ -440,6 +532,7 @@ async def echo(websocket):
             else:
                 data = json.loads(message)
                 if data['action'] == 'connection':
+                    print(data)
                     meeting_id = data['meeting_id']
                     if meeting_id not in active_connections:
                         active_connections[meeting_id] = {}
@@ -447,13 +540,17 @@ async def echo(websocket):
                             # here we have to start the zoom bot
                             active_connections[meeting_id]['host'] = websocket
                             # add the silence duration
-                            silence_durations[meeting_id] = data['silence_duration']
+                            silence_durations_presets[meeting_id] = data['silence_duration']
+                            silence_start_map[meeting_id] = None
+                            last_silence_notification[meeting_id] = 0
+                            ice_breaker_mode = data['icebreaker_mode']
+                            icebreaker_modes[meeting_id] = ice_breaker_mode
                             # add the participatns
                             if meeting_id in waiting_connections:
                                 active_connections[meeting_id]['participants'] = []
-                                for participant in waitning_connections[meeting_id]:
+                                for participant in waiting_connections[meeting_id]:
                                     active_connections[meeting_id]['participants'].append(participant)
-                                del waitning_connections[meeting_id]
+                                del waiting_connections[meeting_id]
                             # start the sdk
                             join_url = data['join_url']
                             await start_sdk(join_url,meeting_id)
@@ -464,8 +561,15 @@ async def echo(websocket):
                             else:
                                 waiting_connections[meeting_id].append(websocket)
                     else:
-                        # if data['user'] == 'ZoomBot':
-                        #     active_connections[meeting_id]['bot'] = websocket
+                        if data['user'] == 'host':
+                            active_connections[meeting_id]['host'] = websocket
+                            if 'bot' not in active_connections[meeting_id]:
+                                # start the sdk
+                                print('here')
+                                join_url = data['join_url']
+                                await start_sdk(join_url,meeting_id)
+                        if data['user'] == 'ZoomBot':
+                            active_connections[meeting_id]['bot'] = websocket   
                         if data['user'] == 'participant':
                             if 'participants' not in active_connections[meeting_id]:
                                 active_connections[meeting_id]['participants'] = [websocket]
@@ -476,25 +580,30 @@ async def echo(websocket):
                         # active_connections[meeting_id].append(websocket)
                 if data['action'] == 'meeting_ended':
                     # here we have to end the audio buffer for meeting
+                    await notify_client_about_meeting_end(data['meeting_id'])
                     del active_connections[meeting_id]
                     asyncio.create_task(process_leftout_buffer(meeting_id=data['meeting_id']))
-                    summary_process = multiprocessing.Process(target=generate_summary, args=(data['meeting_id'],))
-                    summary_process.start()
+                    # send all the clients that meeting has been ended
+                    # summary_process = multiprocessing.Process(target=generate_summary, args=(data['meeting_id'],))
+                    # summary_process.start()
                 if data['action'] == 'get_summary':
                     await get_summary_till_now(meeting_id=data['meetingNumber'],websocket=websocket)
                     
     except Exception as e:
         print(f"❌ Error: {e}")
     finally:
-        remove_connection(websocket)
         print(active_connections)
+        # remove_connection(websocket)
         print(f"🔌 Connection closed: {websocket.remote_address}")
 
 async def get_summary_till_now(meeting_id,websocket):
     final_summary = generate_summary_till_now(meeting_id)
-    message = {'action':'notify','message':final_summary}
+    if final_summary:
+        message = {'action':'notify','message':final_summary}
+    else:
+        message = {'action':'notify','message':"No conversation Yet!!"}
     if meeting_id in active_connections:
-        clients = [active_connections[meeting_id].get('host',None)] + active_connections[meeting_id].get('participants',[])
+        clients = [active_connections[meeting_id].get('host',None)] + active_connections[meeting_id].get('participants',[])        
         for client in clients:
             try:
                 if client:
@@ -509,7 +618,7 @@ async def process_leftout_buffer(meeting_id):
             continue
         audio_buffer = bytearray()
         audio_chunks = audio_data[user][:]
-        timestamps = []  
+        timestamps = []
         print(f"📦 Chunks for transcription: {len(audio_data[user])}")
         for timestamp, audio in audio_chunks:
             audio_buffer.extend(audio)  
@@ -565,10 +674,15 @@ for _ in range(NUM_WORKERS):
 
 async def main():
     loop = asyncio.get_running_loop()
-    transport, protocol = await loop.create_datagram_endpoint(EchoServerProtocol,local_addr=('192.168.7.195', 8080))
-    server = await websockets.serve(echo, "0.0.0.0", 8001)
-    asyncio.create_task(repeated_task())  
-    print("✅ Server started on ws://localhost:8001")
-    await server.wait_closed()
+    transport, protocol = await loop.create_datagram_endpoint(EchoServerProtocol,local_addr=('0.0.0.0', 8080))
+    try:
+        server = await websockets.serve(echo, "0.0.0.0", 8001)
+        print("WebSocket server started on ws://0.0.0.0:8001")
+        asyncio.create_task(repeated_task())  
+        await server.wait_closed()
+    except OSError as e:
+        print(f"Port binding failed: {e}")
+    except Exception as e:
+        print(f"Unexpected server error: {e}")
 
 asyncio.run(main())
