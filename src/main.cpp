@@ -4,6 +4,7 @@
 #include "Zoom.h"
 #include "util/WebSocketClient.h"
 #include "util/UDPSocketClient.h"
+#include <cstdlib>  // For std::getenv
 
 WebSocketClient* g_webSocketClient = nullptr;
 UDPSocketClient* g_udpSocketClient = nullptr;
@@ -45,6 +46,11 @@ gboolean onTimeout (gpointer data) {
  * @return SDKError
  */
 SDKError run(int argc, char** argv) {
+    const char* ws_ip = std::getenv("WS_IP");
+    const char* ws_port = std::getenv("WS_PORT");
+    const char* udp_ip = std::getenv("UDP_IP");
+    const char* udp_port = std::getenv("UDP_PORT");
+
     SDKError err{SDKERR_SUCCESS};
     auto* zoom = &Zoom::getInstance();
 
@@ -54,8 +60,24 @@ SDKError run(int argc, char** argv) {
     atexit(onExit);
 
     g_webSocketClient = new WebSocketClient();
-    g_webSocketClient->connect("ws://192.168.7.195:8001");
-    g_udpSocketClient = new UDPSocketClient("192.168.7.195", 8080);
+    // Check if variables are set
+    if (!ws_ip || !ws_port || !udp_ip || !udp_port) {
+        std::cerr << "Error: Environment variables not set!" << std::endl;
+        return 1;
+    }
+
+    std::string ws_url = "ws://" + std::string(ws_ip) + ":" + std::string(ws_port);
+    int udp_port_int = std::stoi(udp_port);  // Convert UDP port to integer
+
+    // Use environment variables in your socket clients
+    std::cout << "Connecting WebSocket to: " << ws_url << std::endl;
+    std::cout << "Connecting UDP socket to: " << udp_ip << ":" << udp_port_int << std::endl;
+
+    g_webSocketClient->connect(ws_url.c_str());  // Uncomment when using actual WebSocket client
+    g_udpSocketClient = new UDPSocketClient(udp_ip, udp_port_int);  // Uncomment when using actual UDP client
+    
+    // g_webSocketClient->connect("ws://10.42.0.28:8001");
+    // g_udpSocketClient = new UDPSocketClient("10.42.0.28", 8080);
 
     // g_webSocketClient->setMessageHandler([zoom](const std::string& message) {
     //     std::cout << "Received message: " << message << std::endl;
