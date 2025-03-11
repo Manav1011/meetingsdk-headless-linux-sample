@@ -46,8 +46,19 @@ RUN apt-get update  \
 # Install ALSA
 RUN apt-get install -y libasound2 libasound2-plugins alsa alsa-utils alsa-oss
 
-# Install Pulseaudio
-RUN apt-get install -y  pulseaudio pulseaudio-utils
+# Install necessary compilers
+RUN apt-get update && apt-get install -y \
+    gcc-12 g++-12 clang-15
+
+# Set GCC 12, G++ 12, and Clang 15 as default
+RUN update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 100 \
+    && update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-12 100 \
+    && update-alternatives --install /usr/bin/clang clang /usr/bin/clang-15 100
+
+RUN apt-get install -y pulseaudio pulseaudio-utils
+
+# Copy the entire project into the container
+COPY . /tmp/meeting-sdk-linux-sample
 
 FROM base AS deps
 
@@ -55,18 +66,24 @@ ENV TINI_VERSION v0.19.0
 ADD https://github.com/krallin/tini/releases/download/${TINI_VERSION}/tini /tini
 RUN chmod +x /tini
 
-RUN apt-get update && apt-get install -y autoconf automake autoconf-archive
+RUN apt-get update && apt-get install -y autoconf automake autoconf-archive ninja-build
+
+# Set Environment Variables for Vcpkg to Use GCC 12
+ENV CXX=/usr/bin/g++-12
+ENV CC=/usr/bin/gcc-12
 
 WORKDIR /opt
-RUN git clone --depth 1 https://github.com/Microsoft/vcpkg.git \
-    && ./vcpkg/bootstrap-vcpkg.sh -disableMetrics \
+RUN git clone https://github.com/Microsoft/vcpkg.git \
+    && cd vcpkg \
+    && git checkout 23b33f5a010e3d67132fa3c34ab6cd0009bb9296 \
+    && ./bootstrap-vcpkg.sh -disableMetrics \
     && ln -s /opt/vcpkg/vcpkg /usr/local/bin/vcpkg \
-    && vcpkg install vcpkg-cmake boost-system boost-asio boost-log
+    && vcpkg install vcpkg-cmake boost-system boost-asio boost-log \
+    && vcpkg install ada-url cli11 jwt-cpp websocketpp
 
 FROM deps AS build
 
 WORKDIR $cwd
-
 
 # Set CMake to use vcpkg toolchain
 ENV CMAKE_TOOLCHAIN_FILE=/opt/vcpkg/scripts/buildsystems/vcpkg.cmake

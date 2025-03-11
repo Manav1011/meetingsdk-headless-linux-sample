@@ -63,7 +63,7 @@ SDKError run(int argc, char** argv) {
     // Check if variables are set
     if (!ws_ip || !ws_port || !udp_ip || !udp_port) {
         std::cerr << "Error: Environment variables not set!" << std::endl;
-        return 1;
+        // return 1;
     }
 
     std::string ws_url = "ws://" + std::string(ws_ip) + ":" + std::string(ws_port);
@@ -75,7 +75,7 @@ SDKError run(int argc, char** argv) {
 
     g_webSocketClient->connect(ws_url.c_str());  // Uncomment when using actual WebSocket client
     g_udpSocketClient = new UDPSocketClient(udp_ip, udp_port_int);  // Uncomment when using actual UDP client
-    
+
     // g_webSocketClient->connect("ws://10.42.0.28:8001");
     // g_udpSocketClient = new UDPSocketClient("10.42.0.28", 8080);
 

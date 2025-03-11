@@ -1,10 +1,23 @@
 services:
   zoomsdk: &zoomsdk
-    build: ./
+    image : manav1011/meetingsdk-headless-linux-sample-zoomsdk:newfeb7
     platform: linux/amd64
     volumes:
-     - .:/tmp/meeting-sdk-linux-sample
-    ports:
-      - "3000:3000"
-    command: ["--join-url", "https://us04web.zoom.us/j/79301442827?pwd=B1dMhLavwgInaCkOIclOogFgWbimMb"]
+      - zoomsdk_code_temp:/tmp/meeting-sdk-linux-sample  # Use volume instead of local directory
+    # ports:
+    #   - "3000:3000"
+    command: 
+      - "--join-url"
+      - "https://us04web.zoom.us/j/76676507936?pwd=a6dcYLdSI5asOKGvFbXPSG8AwWzvaV.1"
+      - "--client-id"
+      - "N93i4rnJQRiQMocWhthlDA"
+      - "--client-secret"
+      - "3gYFY3G8vZ7UaadkJi58b71dpsMbo1NO"
+    environment:
+      WS_IP: "10.42.0.28"
+      WS_PORT: "8001"
+      UDP_IP: "10.42.0.28"
+      UDP_PORT: "8080"
 
+volumes:
+  zoomsdk_code_temp:

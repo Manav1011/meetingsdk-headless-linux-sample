@@ -12,7 +12,7 @@ lib/zoomsdk/images
 lib/zoomsdk/h
 lib/zoomsdk/json
 lib/zoomsdk/qt_libs
-lib/zoomsdk/*.so
+# lib/zoomsdk/*.so
 lib/zoomsdk/*.md
 
 # PCM files
@@ -29,19 +29,19 @@ lib/zoomsdk/*.md
 *.d
 
 # Compiled Object files
-*.slo
-*.lo
-*.o
-*.obj
+# *.slo
+# *.lo
+# *.o
+# *.obj
 
 # Precompiled Headers
 *.gch
 *.pch
 
 # Compiled Dynamic libraries
-*.so
-*.dylib
-*.dll
+# *.so
+# *.dylib
+# *.dll
 
 # Fortran module files
 *.mod
